@@ -294,6 +294,39 @@ Output reminders in a clear, boxed format at the very end of the skill's output:
 
 Keep it brief — max 3 reminders per run. Prioritize by urgency (context health > session behavior > file organization).
 
+## Step 4: Session Health Report
+
+Before the reminders box, always output a full session health report. This gives the user an at-a-glance view of their session state every time the skill runs.
+
+Run the same diagnostics as `/session-health`:
+
+1. Check context window usage percentage
+2. Count approximate conversation turns
+3. Check last save timestamp from `context-logs/`
+4. Count unsaved/uncommitted files via `git status`
+5. Detect session behavior flags (task mixing, prior compactions, error loops, topic switches)
+
+Output in this format:
+
+```
+╔══════════════════════════════════╗
+║        SESSION HEALTH            ║
+╠══════════════════════════════════╣
+║ Context:  ~XX% [██████░░░░] ZONE ║
+║ Turns:    ~XX                    ║
+║ Last save: XX min ago / never    ║
+║ Unsaved files: X                 ║
+╠══════════════════════════════════╣
+║ DIAGNOSIS                        ║
+║ - [any flags detected]           ║
+╠══════════════════════════════════╣
+║ RECOMMENDATION                   ║
+║ [one clear action to take]       ║
+╚══════════════════════════════════╝
+```
+
+This ensures the user always sees session health whenever auto-save runs, without needing to invoke `/session-health` separately.
+
 ---
 
 ## Using Handoffs to Start Fresh Sessions (WISC Framework)
