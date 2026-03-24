@@ -148,7 +148,31 @@ This creates a trail so the next session can see if recurring issues are buildin
 
 The context save format is specifically designed to prevent context rot in future sessions. Research shows that structured handoff documents with clear sections for "intent", "state", and "next steps" significantly improve AI performance when bootstrapping new sessions.
 
-Generate two files with a timestamped filename prefix (format: `YYYY-MM-DD_HH-MM-SS`):
+Generate two files with a timestamped filename prefix (format: `YYYY-MM-DD_HH-MM-SS`).
+
+### CRITICAL: Secrets Sanitization (before writing ANY context log file)
+
+Before writing either the summary or transcript file, **scan all content for secrets and redact them**. This prevents API keys, tokens, and passwords from being committed and pushed to git.
+
+**Patterns to detect and redact** (replace matches with `[REDACTED-<type>]`):
+
+| Type | Pattern examples | Replacement |
+|------|-----------------|-------------|
+| API keys | `sk-...`, `pk-...`, `api_key=...`, `apikey:...`, any string matching `[A-Za-z0-9_-]{20,}` that appears after `key`, `token`, `secret`, `password`, `api`, `auth` | `[REDACTED-API-KEY]` |
+| Bearer tokens | `Bearer eyJ...`, `token: eyJ...` | `[REDACTED-BEARER-TOKEN]` |
+| AWS keys | `AKIA...` (20 chars), AWS secret keys (40 chars after `aws_secret`) | `[REDACTED-AWS-KEY]` |
+| Private keys | `-----BEGIN (RSA\|EC\|PRIVATE) KEY-----` blocks | `[REDACTED-PRIVATE-KEY]` |
+| Connection strings | `postgres://...`, `mysql://...`, `mongodb://...`, `redis://...` with credentials | `[REDACTED-CONNECTION-STRING]` |
+| Passwords | Values after `password=`, `passwd=`, `pwd=`, `pass:` | `[REDACTED-PASSWORD]` |
+| Common provider keys | OpenAI (`sk-proj-...`), Anthropic (`sk-ant-...`), Stripe (`sk_live_...`, `sk_test_...`), GitHub (`ghp_...`, `gho_...`, `ghs_...`), Slack (`xoxb-...`, `xoxp-...`), SendGrid (`SG....`) | `[REDACTED-<PROVIDER>-KEY]` |
+| Hex/base64 secrets | Long hex strings (40+ chars) or base64 strings (40+ chars) appearing in secret-like contexts | `[REDACTED-SECRET]` |
+
+**Rules:**
+- Scan BOTH summary and transcript content before writing to disk
+- In transcripts, redact secrets from user messages — the user may have pasted keys in chat
+- In summaries, never include actual key values in "Key Decisions" or "Changes Made" — describe them generically (e.g., "configured OpenAI API key in .env" not the actual key)
+- If you detect a secret was shared in the conversation, add a warning to the summary: `**WARNING:** Secrets were shared in this session. Originals redacted from logs. Ensure they are stored securely (e.g., in .env files, not committed to git).`
+- When in doubt, redact. A false positive redaction is harmless; a leaked key is not.
 
 ### Summary / Handoff file: `context-logs/<timestamp>_summary.md`
 
@@ -234,7 +258,12 @@ After saving context and organization notes:
    ```
    The "AI layer improvements" section is inspired by the WISC framework — when the agent's own rules or commands improve during a session, documenting that in the commit helps future sessions understand how the AI setup has evolved.
 
-3. **Push to the remote.** Run `git push`. If the current branch has no upstream, use `git push -u origin <branch-name>`. If push fails, report clearly — don't retry in a loop.
+3. **Pre-push secrets audit.** Before pushing, scan all staged context-log files for any secrets that may have slipped through sanitization:
+   - Run `grep -rEi '(sk-[a-zA-Z0-9]{20,}|sk-ant-|sk-proj-|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0-9]{36}|gho_|ghs_|xoxb-|xoxp-|sk_live_|sk_test_|SG\.[a-zA-Z0-9_-]{22,}|-----BEGIN.*KEY-----|Bearer eyJ|password\s*[:=])' context-logs/` on the staged files.
+   - If ANY matches are found: **abort the commit**, report the exact file(s) and line(s) with secrets, redact the secrets from those files, then re-stage and re-commit.
+   - Only proceed to push after the scan comes back clean.
+
+4. **Push to the remote.** Run `git push`. If the current branch has no upstream, use `git push -u origin <branch-name>`. If push fails, report clearly — don't retry in a loop.
 
 ---
 
@@ -309,20 +338,20 @@ Run the same diagnostics as `/session-health`:
 Output in this format:
 
 ```
-╔══════════════════════════════════╗
-║        SESSION HEALTH            ║
-╠══════════════════════════════════╣
-║ Context:  ~XX% [██████░░░░] ZONE ║
-║ Turns:    ~XX                    ║
-║ Last save: XX min ago / never    ║
-║ Unsaved files: X                 ║
-╠══════════════════════════════════╣
-║ DIAGNOSIS                        ║
-║ - [any flags detected]           ║
-╠══════════════════════════════════╣
-║ RECOMMENDATION                   ║
-║ [one clear action to take]       ║
-╚══════════════════════════════════╝
++----------------------------------------------+
+|              SESSION HEALTH                  |
++----------------------------------------------+
+| Context:    ~XX% [======----] ZONE           |
+| Turns:      ~XX                              |
+| Last save:  XX min ago / never               |
+| Unsaved:    X files                          |
++----------------------------------------------+
+| DIAGNOSIS                                    |
+| - [any flags detected]                       |
++----------------------------------------------+
+| RECOMMENDATION                               |
+| [one clear action to take]                   |
++----------------------------------------------+
 ```
 
 This ensures the user always sees session health whenever auto-save runs, without needing to invoke `/session-health` separately.
